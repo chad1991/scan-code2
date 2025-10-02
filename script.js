@@ -360,7 +360,19 @@ function renderBatches() {
 renderEntries();
 renderBatches();
 
-// ================== FORCE OPEN IN CHROME ==================
-if (navigator.userAgent.includes("FBAN") || navigator.userAgent.includes("FBAV")) {
-  window.location.href = "googlechrome://" + window.location.href.replace(/^https?:\/\//, "");
-}
+// ================== FORCE OPEN IN BROWSER ==================
+(function() {
+  const ua = navigator.userAgent || "";
+  const inApp = ua.includes("FBAN") || ua.includes("FBAV") || ua.includes("Instagram") || ua.includes("Line");
+
+  if (inApp) {
+    const url = window.location.href;
+    // iOS -> try Chrome scheme
+    if (/iPhone|iPad|iPod/i.test(ua)) {
+      window.location.href = "googlechrome://" + url.replace(/^https?:\/\//, "");
+    } else {
+      // Android & others -> force open in default browser
+      window.open(url, "_blank");
+    }
+  }
+})();
