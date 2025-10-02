@@ -366,13 +366,22 @@ renderBatches();
   const inApp = ua.includes("FBAN") || ua.includes("FBAV") || ua.includes("Instagram") || ua.includes("Line");
 
   if (inApp) {
-    const url = window.location.href;
-    // iOS -> try Chrome scheme
-    if (/iPhone|iPad|iPod/i.test(ua)) {
-      window.location.href = "googlechrome://" + url.replace(/^https?:\/\//, "");
-    } else {
-      // Android & others -> force open in default browser
-      window.open(url, "_blank");
-    }
+    // Show notice + button
+    document.getElementById("openBrowserNotice").style.display = "block";
+
+    // When clicked, try to open externally
+    document.getElementById("openInBrowserBtn").addEventListener("click", (e) => {
+      e.preventDefault();
+      const url = window.location.href;
+
+      if (/iPhone|iPad|iPod/i.test(ua)) {
+        // iOS -> try Chrome scheme
+        window.location.href = "googlechrome://" + url.replace(/^https?:\/\//, "");
+      } else {
+        // Android -> trick to force external browser
+        window.location.href = "intent://" + url.replace(/^https?:\/\//, "") +
+          "#Intent;scheme=https;package=com.android.chrome;end";
+      }
+    });
   }
 })();
