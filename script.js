@@ -359,3 +359,8 @@ function renderBatches() {
 // Initial render
 renderEntries();
 renderBatches();
+
+// ================== FORCE OPEN IN CHROME ==================
+if (navigator.userAgent.includes("FBAN") || navigator.userAgent.includes("FBAV")) {
+  window.location.href = "googlechrome://" + window.location.href.replace(/^https?:\/\//, "");
+}
