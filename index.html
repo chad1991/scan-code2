@@ -15,13 +15,8 @@
   <style>
     body { font-family: Arial, sans-serif; padding: 10px; text-align: center; }
     #cameraPreview {
-      width: 320px;
-      height: 240px;
-      border: 3px solid #333;
-      border-radius: 8px;
-      background: black;
-      margin: 15px auto;
-      display: block;
+      width: 320px; height: 240px; border: 3px solid #333;
+      border-radius: 8px; background: black; margin: 15px auto; display: block;
     }
     #result { margin-top: 10px; font-weight: bold; }
     .actions { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
@@ -43,7 +38,6 @@
       const ua = navigator.userAgent || navigator.vendor || window.opera;
       return (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1) || (ua.indexOf("Instagram") > -1);
     }
-
     if (isInAppBrowser()) {
       window.addEventListener("load", function () {
         const notice = document.createElement("div");
@@ -54,7 +48,7 @@
             <h2>⚠️ Open in Chrome for best experience</h2>
             <p>Messenger opens links inside its own browser.<br>
             Tap the button below to open this app in Chrome.</p>
-            <a href="intent://chad1991.github.io/scan-code2#Intent;scheme=https;package=com.android.chrome;end"
+            <a href="intent://chad1991.github.io/scan-code#Intent;scheme=https;package=com.android.chrome;end"
                style="background:#4285f4;color:white;padding:15px 25px;
                border-radius:8px;font-size:18px;text-decoration:none;">
                🚀 Open in Chrome
@@ -65,7 +59,6 @@
       });
     }
   </script>
-
 </head>
 <body>
   <h2>📷 Barcode Scanner</h2>
@@ -83,8 +76,13 @@
     </select>
   </div>
 
-  <!-- Batch Header (Loaded from header.html) -->
-  <div id="headerInclude"></div>
+  <!-- Batch Header -->
+  <div id="batchHeader" style="margin-top:15px; padding:10px; border:1px solid #ccc; border-radius:6px; display:inline-block; text-align:left;">
+    <h4>📝 Batch Header</h4>
+    <label>Date: <input type="date" id="logDate"></label><br><br>
+    <label>Store: <input type="text" id="storeName" placeholder="Store Name"></label><br><br>
+    <label>Discount: <input type="number" id="discount" value="0" min="0" max="100"> %</label>
+  </div>
 
   <p id="result">Scan a barcode...</p>
 
@@ -94,7 +92,7 @@
     <button type="button" onclick="stopScanner()">⏹ Stop</button>
     <button type="button" onclick="downloadExcel()">💾 Save Excel</button>
     <button type="button" onclick="clearHistory()">🗑️ Clear All</button>
-    <button type="button" onclick="nextBatch()">➡️ Next</button>
+    <button type="button" onclick="nextBatch()">➡️ Next Batch</button>
   </div>
 
   <!-- Beep Sounds -->
@@ -117,18 +115,5 @@
   <ul id="batchesList"></ul>
 
   <script src="script.js"></script>
-  <script>
-    // Load header.html dynamically
-    fetch("header.html")
-      .then(res => res.text())
-      .then(data => {
-        document.getElementById("headerInclude").innerHTML = data;
-        loadHeaderFromStorage();
-      });
-
-    // Restore scan mode
-    document.getElementById("scanModeSelect").value = localStorage.getItem("scanMode") || "all";
-  </script>
 </body>
 </html>
-
