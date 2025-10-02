@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>📷 Barcode Scanner Logsheet</title>
 
@@ -13,107 +13,115 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
   <style>
-    body { font-family: Arial, sans-serif; padding: 10px; text-align: center; }
+    body { font-family: Arial, sans-serif; padding: 12px; background:#f6f7fb; color:#222; }
+    h2 { margin: 0 0 8px 0; }
     #cameraPreview {
-      width: 320px; height: 240px; border: 3px solid #333;
-      border-radius: 8px; background: black; margin: 15px auto; display: block;
+      width: 360px; height: 270px; border-radius:8px; border:3px solid #333;
+      background:black; display:block; margin:12px auto;
+      object-fit: cover;
     }
-    #result { margin-top: 10px; font-weight: bold; }
-    .actions { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
-    .actions button { flex: 1; min-width: 120px; padding: 8px; border-radius: 6px; border: none; cursor: pointer; }
-    #entriesList { list-style: none; padding: 0; margin-top: 15px; text-align: left; }
-    #entriesList li { margin: 6px 0; padding: 6px; background: #f9f9f9; border-radius: 6px; cursor: pointer; }
-    #manualForm { margin-top: 15px; padding: 10px; border: 1px solid #ccc; border-radius: 6px; display: inline-block; text-align: left; }
-    #manualForm input { padding: 6px; margin: 4px; width: 140px; }
-    #manualForm button { padding: 6px 10px; margin: 4px; border: none; border-radius: 6px; cursor: pointer;
-      background: #007bff; color: white; }
-    #batchesList { list-style: none; padding: 0; margin-top: 15px; text-align: left; }
-    #batchesList li { margin: 6px 0; padding: 6px; background: #eef; border-radius: 6px; }
-    #batchesList button { padding: 2px 6px; margin-left: 10px; }
+    .controls { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:12px; }
+    .controls button, .controls select { padding:8px 10px; border-radius:6px; border:1px solid #ccc; background:white; cursor:pointer; }
+    #manualForm { margin:10px auto; padding:10px; border-radius:8px; background:white; width:100%; max-width:760px; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+    #manualForm input { padding:6px; margin:4px; }
+    #logTable { width:100%; max-width:760px; margin:12px auto; border-collapse:collapse; background:white; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+    #logTable th, #logTable td { border:1px solid #e6e6e6; padding:8px; text-align:center; }
+    #batchesList, #entriesList { list-style:none; padding:0; margin:8px 0; max-width:760px; margin-left:auto; margin-right:auto; }
+    #batchesList li { background:#eef; padding:8px; margin:6px 0; border-radius:6px; display:flex; justify-content:space-between; align-items:center; }
+    .small-btn { padding:6px 8px; border-radius:6px; border:0; cursor:pointer; }
+    .danger { background:#ff6b6b; color:white; }
+    .primary { background:#3478f6; color:white; }
+    .muted { background:#f0f0f0; color:#333; }
+    #result { text-align:center; font-weight:600; margin-top:6px; }
   </style>
 
-  <!-- Messenger / In-app browser detection & overlay -->
+  <!-- In-app browser notice (Messenger / Instagram) -->
   <script>
-    function isInAppBrowser() {
+    function isInAppBrowser(){
       const ua = navigator.userAgent || navigator.vendor || window.opera;
-      return (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1) || (ua.indexOf("Instagram") > -1);
+      return (/FBAN|FBAV|Instagram/i).test(ua);
     }
-    if (isInAppBrowser()) {
-      window.addEventListener("load", function () {
-        const notice = document.createElement("div");
+    window.addEventListener('load', () => {
+      if (isInAppBrowser()) {
+        const notice = document.createElement('div');
+        notice.style = 'position:fixed;inset:0;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;padding:20px;text-align:center';
         notice.innerHTML = `
-          <div style="position:fixed;top:0;left:0;width:100%;height:100%;
-          background:#fff;display:flex;flex-direction:column;justify-content:center;
-          align-items:center;z-index:9999;text-align:center;padding:20px;">
-            <h2>⚠️ Open in Chrome for best experience</h2>
-            <p>Messenger opens links inside its own browser.<br>
-            Tap the button below to open this app in Chrome.</p>
-            <a href="intent://chad1991.github.io/scan-code#Intent;scheme=https;package=com.android.chrome;end"
-               style="background:#4285f4;color:white;padding:15px 25px;
-               border-radius:8px;font-size:18px;text-decoration:none;">
-               🚀 Open in Chrome
-            </a>
-          </div>
+          <h2>⚠️ Open in Chrome for best experience</h2>
+          <p>Messenger/Instagram uses an in-app browser that may block the camera or downloads.<br>Tap below to open in Chrome.</p>
+          <a id="openChrome" style="display:inline-block;margin-top:12px;padding:12px 18px;border-radius:8px;background:#4285f4;color:#fff;text-decoration:none;">🚀 Open in Chrome</a>
         `;
         document.body.appendChild(notice);
-      });
-    }
+        document.getElementById('openChrome').addEventListener('click', () => {
+          // open using intent scheme (best-effort)
+          window.location.href = "intent://" + location.hostname + location.pathname + "#Intent;scheme=https;package=com.android.chrome;end";
+        });
+      }
+    });
   </script>
 </head>
 <body>
-  <h2>📷 Barcode Scanner</h2>
+  <h2>📷 Barcode Scanner Logsheet</h2>
 
-  <!-- Camera Preview -->
+  <!-- Camera preview -->
   <video id="cameraPreview" autoplay playsinline muted></video>
+  <div id="result">Ready to scan</div>
 
-  <!-- Scan Mode Selector -->
-  <div style="margin-top:10px;">
-    <label><strong>Scan Mode:</strong></label>
-    <select id="scanModeSelect" onchange="switchMode(this.value)">
-      <option value="1d">1D Only</option>
-      <option value="2d">2D Only</option>
-      <option value="all" selected>All</option>
-    </select>
+  <!-- Scan Mode controls -->
+  <div class="controls">
+    <label>
+      <strong>Scan Mode:&nbsp;</strong>
+      <select id="scanModeSelect" onchange="switchMode(this.value)">
+        <option value="1d">1D Only</option>
+        <option value="2d">2D Only</option>
+        <option value="all">All (best)</option>
+      </select>
+    </label>
+
+    <button class="primary" onclick="startScanner()">▶️ Start</button>
+    <button onclick="stopScanner()">⏹ Stop</button>
+    <button onclick="toggleCamera()">🔄 Toggle Camera</button>
+    <button onclick="downloadExcel()">💾 Save Excel</button>
+    <button class="danger" onclick="clearAll()">🗑️ Clear All</button>
+    <button onclick="nextBatch()">➡️ Next Batch</button>
   </div>
 
-  <!-- Batch Header -->
-  <div id="batchHeader" style="margin-top:15px; padding:10px; border:1px solid #ccc; border-radius:6px; display:inline-block; text-align:left;">
-    <h4>📝 Batch Header</h4>
-    <label>Date: <input type="date" id="logDate"></label><br><br>
-    <label>Store: <input type="text" id="storeName" placeholder="Store Name"></label><br><br>
-    <label>Discount: <input type="number" id="discount" value="0" min="0" max="100"> %</label>
+  <!-- Batch header included from header.html -->
+  <div id="headerInclude" style="text-align:center;"></div>
+
+  <!-- Manual entry -->
+  <div id="manualForm">
+    <strong>✍️ Manual Entry</strong><br>
+    <input id="manualBarcode" placeholder="Barcode" type="text">
+    <input id="manualQty" placeholder="Qty" type="number" min="1" value="1">
+    <input id="manualPrice" placeholder="Price" type="number" step="0.01" min="0">
+    <button class="primary" onclick="addManual()">Add</button>
   </div>
 
-  <p id="result">Scan a barcode...</p>
+  <!-- Log table -->
+  <table id="logTable">
+    <thead>
+      <tr><th>Barcode</th><th>Qty</th><th>Price</th><th>Actions</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 
-  <div class="actions">
-    <button type="button" onclick="startScanner()">▶️ Restart</button>
-    <button type="button" onclick="toggleCamera()">🔄 Toggle Camera</button>
-    <button type="button" onclick="stopScanner()">⏹ Stop</button>
-    <button type="button" onclick="downloadExcel()">💾 Save Excel</button>
-    <button type="button" onclick="clearHistory()">🗑️ Clear All</button>
-    <button type="button" onclick="nextBatch()">➡️ Next Batch</button>
-  </div>
+  <h3 style="text-align:center;margin-top:16px;">📦 Saved Batches</h3>
+  <ul id="batchesList"></ul>
 
-  <!-- Beep Sounds -->
+  <!-- sounds -->
   <audio id="beepSuccess" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg" preload="auto"></audio>
   <audio id="beepError" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
 
-  <!-- Manual Entry -->
-  <div id="manualForm">
-    <h4>✍️ Manual Entry</h4>
-    <input type="text" id="manualBarcode" placeholder="Barcode" />
-    <input type="number" id="manualQty" placeholder="Qty" min="1" value="1" />
-    <input type="number" id="manualPrice" placeholder="Price" step="0.01" />
-    <button onclick="addManualEntry()">Add</button>
-  </div>
-
-  <h3>📋 Saved Entries</h3>
-  <ul id="entriesList"></ul>
-
-  <h3>📦 Saved Batches</h3>
-  <ul id="batchesList"></ul>
-
   <script src="script.js"></script>
+  <script>
+    // load header.html and restore header fields
+    fetch('header.html').then(r => r.text()).then(html => {
+      document.getElementById('headerInclude').innerHTML = html;
+      restoreHeader();
+    });
+
+    // restore scan mode
+    document.getElementById('scanModeSelect').value = localStorage.getItem('scanMode') || 'all';
+  </script>
 </body>
 </html>
