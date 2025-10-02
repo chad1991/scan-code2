@@ -1,23 +1,56 @@
+// Force open in Chrome/Browser if opened inside Messenger or FB in-app browser
+(function() {
+  const ua = navigator.userAgent || navigator.vendor || "";
+  if (ua.includes("FBAN") || ua.includes("FBAV") || ua.includes("Messenger")) {
+    // Android: force Chrome, iOS: fallback to Safari
+    if (/Android/i.test(ua)) {
+      window.location = "intent://" + window.location.host + window.location.pathname + "#Intent;scheme=https;package=com.android.chrome;end";
+    } else {
+      window.location = window.location.href; // iOS reopens in Safari
+    }
+  }
+})();
+
 let currentStream = null;
-let usingBackCamera = true;
-let scanMode = localStorage.getItem("scanMode") || "all";
+let currentMode = "all";
+let usingFrontCamera = false;
 
 let entries = [];
-let batches = JSON.parse(localStorage.getItem("batches")) || [];
+let batches = [];
 
-function startScanner() {
+// ====== CAMERA & SCANNER ======
+async function startScanner() {
   stopScanner();
-
   const constraints = {
-    video: { facingMode: usingBackCamera ? "environment" : "user" }
+    video: { facingMode: usingFrontCamera ? "user" : "environment" }
   };
+  try {
+    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+    const video = document.getElementById("cameraPreview");
+    video.srcObject = currentStream;
 
-  navigator.mediaDevices.getUserMedia(constraints).then(stream => {
-    currentStream = stream;
-    document.getElementById("cameraPreview").srcObject = stream;
-  });
+    if (currentMode === "1d" || currentMode === "all") {
+      Quagga.init({
+        inputStream: { type: "LiveStream", target: video, constraints },
+        decoder: { readers: ["ean_reader", "code128_reader", "upc_reader"] }
+      }, err => { if (!err) Quagga.start(); });
 
-  console.log("Scanner started in mode:", scanMode);
+      Quagga.onDetected(res => {
+        if (res && res.codeResult && res.codeResult.code) {
+          handleScan(res.codeResult.code);
+        }
+      });
+    }
+
+    if (currentMode === "2d" || currentMode === "all") {
+      const codeReader = new ZXing.BrowserMultiFormatReader();
+      codeReader.decodeFromVideoDevice(null, "cameraPreview", (res, err) => {
+        if (res) handleScan(res.text);
+      });
+    }
+  } catch (err) {
+    console.error("Camera error:", err);
+  }
 }
 
 function stopScanner() {
@@ -25,150 +58,158 @@ function stopScanner() {
     currentStream.getTracks().forEach(track => track.stop());
     currentStream = null;
   }
+  if (Quagga) Quagga.stop();
 }
 
 function toggleCamera() {
-  usingBackCamera = !usingBackCamera;
+  usingFrontCamera = !usingFrontCamera;
   startScanner();
 }
 
 function switchMode(mode) {
-  scanMode = mode;
-  localStorage.setItem("scanMode", mode);
+  currentMode = mode;
   startScanner();
 }
 
-function beep(success = true) {
-  (success ? document.getElementById("beepSuccess") : document.getElementById("beepError")).play();
-}
+// ====== ENTRIES ======
+function handleScan(code) {
+  document.getElementById("beepSuccess").play();
+  document.getElementById("result").textContent = "Scanned: " + code;
 
-function addEntry(barcode, qty = 1, price = 0) {
-  const existing = entries.find(e => e.barcode === barcode);
+  let existing = entries.find(e => e.barcode === code);
   if (existing) {
-    existing.qty += qty;
-    beep(true);
+    existing.qty += 1;
   } else {
-    entries.push({ barcode, qty, price });
-    beep(true);
+    entries.push({ barcode: code, qty: 1, price: 0 });
   }
   renderEntries();
 }
 
+function renderEntries() {
+  const ul = document.getElementById("entriesList");
+  ul.innerHTML = "";
+  entries.forEach((e, idx) => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <span>${e.barcode}</span>
+      Qty: <input type="number" value="${e.qty}" min="1" onchange="updateEntry(${idx}, 'qty', this.value)">
+      Price: <input type="number" value="${e.price}" step="0.01" onchange="updateEntry(${idx}, 'price', this.value)">
+      <button onclick="deleteEntry(${idx})">❌</button>
+    `;
+    ul.appendChild(li);
+  });
+}
+
+function updateEntry(i, field, val) {
+  entries[i][field] = parseFloat(val);
+}
+
+function deleteEntry(i) {
+  entries.splice(i, 1);
+  renderEntries();
+}
+
 function addManualEntry() {
-  const barcode = document.getElementById("manualBarcode").value.trim();
-  const qty = parseInt(document.getElementById("manualQty").value) || 1;
-  const price = parseFloat(document.getElementById("manualPrice").value) || 0;
-  if (!barcode) return;
-  addEntry(barcode, qty, price);
+  const b = document.getElementById("manualBarcode").value.trim();
+  const q = parseInt(document.getElementById("manualQty").value);
+  const p = parseFloat(document.getElementById("manualPrice").value) || 0;
+  if (!b) return;
+
+  let existing = entries.find(e => e.barcode === b);
+  if (existing) {
+    existing.qty += q;
+    existing.price = p;
+  } else {
+    entries.push({ barcode: b, qty: q, price: p });
+  }
+  renderEntries();
+
   document.getElementById("manualBarcode").value = "";
   document.getElementById("manualQty").value = 1;
   document.getElementById("manualPrice").value = "";
 }
 
-function renderEntries() {
-  const list = document.getElementById("entriesList");
-  list.innerHTML = "";
-  entries.forEach((e, i) => {
-    const li = document.createElement("li");
-    li.innerHTML = `
-      <span>${e.barcode}</span>
-      Qty: <input type="number" value="${e.qty}" min="1" onchange="updateEntry(${i}, 'qty', this.value)">
-      Price: <input type="number" value="${e.price}" step="0.01" onchange="updateEntry(${i}, 'price', this.value)">
-    `;
-    list.appendChild(li);
-  });
-}
-
-function updateEntry(index, field, value) {
-  if (field === "qty") entries[index].qty = parseInt(value) || 1;
-  if (field === "price") entries[index].price = parseFloat(value) || 0;
-}
-
+// ====== BATCHES ======
 function nextBatch() {
-  if (entries.length === 0) return alert("No entries to save!");
+  if (entries.length === 0) return;
 
-  const batchHeader = {
+  const header = {
     date: document.getElementById("logDate").value,
     store: document.getElementById("storeName").value,
     discount: document.getElementById("discount").value
   };
+  batches.push({ header, items: [...entries] });
 
-  batches.push({ header: batchHeader, entries: [...entries] });
-  localStorage.setItem("batches", JSON.stringify(batches));
-
-  renderBatches();
   entries = [];
   renderEntries();
+  renderBatches();
 }
 
 function renderBatches() {
-  const list = document.getElementById("batchesList");
-  list.innerHTML = "";
-  batches.forEach((b, i) => {
+  const ul = document.getElementById("batchesList");
+  ul.innerHTML = "";
+  batches.forEach((b, idx) => {
     const li = document.createElement("li");
     li.innerHTML = `
-      Batch ${i + 1} - ${b.header.date || "No date"} (${b.entries.length} items)
-      <button class="view" onclick="viewBatch(${i})">👁 View</button>
-      <button class="delete" onclick="deleteBatch(${i})">❌ Delete</button>
+      Batch ${idx+1} - ${b.header.store || "No Store"}
+      <div>
+        <button class="view" onclick="viewBatch(${idx})">View</button>
+        <button class="delete" onclick="deleteBatch(${idx})">Delete</button>
+      </div>
     `;
-    list.appendChild(li);
+    ul.appendChild(li);
   });
 }
 
-function viewBatch(index) {
-  const batch = batches[index];
-  document.getElementById("modalTitle").textContent = `Batch ${index + 1} Details`;
-  document.getElementById("modalHeader").innerHTML =
-    `Date: ${batch.header.date || "N/A"}<br>
-     Store: ${batch.header.store || "N/A"}<br>
-     Discount: ${batch.header.discount || 0}%`;
+function viewBatch(i) {
+  const b = batches[i];
+  document.getElementById("modalTitle").textContent = `Batch ${i+1}`;
+  document.getElementById("modalHeader").textContent =
+    `Date: ${b.header.date}, Store: ${b.header.store}, Discount: ${b.header.discount}%`;
 
   const tbody = document.getElementById("modalTableBody");
   tbody.innerHTML = "";
-  batch.entries.forEach(e => {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td>${e.barcode}</td><td>${e.qty}</td><td>${e.price}</td>`;
-    tbody.appendChild(row);
+  b.items.forEach(it => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${it.barcode}</td><td>${it.qty}</td><td>${it.price}</td>`;
+    tbody.appendChild(tr);
   });
-
   document.getElementById("batchModal").style.display = "flex";
+}
+
+function deleteBatch(i) {
+  batches.splice(i, 1);
+  renderBatches();
 }
 
 function closeModal() {
   document.getElementById("batchModal").style.display = "none";
 }
 
-function deleteBatch(index) {
-  if (!confirm("Delete this batch permanently?")) return;
-  batches.splice(index, 1);
-  localStorage.setItem("batches", JSON.stringify(batches));
-  renderBatches();
+function clearHistory() {
+  if (confirm("Clear all entries and batches?")) {
+    entries = [];
+    batches = [];
+    renderEntries();
+    renderBatches();
+  }
 }
 
+// ====== EXPORT ======
 function downloadExcel() {
-  if (batches.length === 0) return alert("No batches to export!");
+  if (batches.length === 0) return;
 
   const wb = XLSX.utils.book_new();
 
-  batches.forEach((batch, i) => {
-    const data = [["Barcode", "Qty", "Price"]];
-    batch.entries.forEach(e => data.push([e.barcode, e.qty, e.price]));
+  batches.forEach((b, idx) => {
+    let data = [["Barcode", "Qty", "Price"]];
+    b.items.forEach(it => data.push([it.barcode, it.qty, it.price]));
     const ws = XLSX.utils.aoa_to_sheet(data);
-    XLSX.utils.book_append_sheet(wb, ws, `Batch_${i + 1}`);
+    XLSX.utils.book_append_sheet(wb, ws, `Batch${idx+1}`);
   });
 
   XLSX.writeFile(wb, "batches.xlsx");
 }
 
-function clearHistory() {
-  if (!confirm("⚠️ This will permanently clear all batches. Continue?")) return;
-  entries = [];
-  batches = [];
-  localStorage.removeItem("batches");
-  renderEntries();
-  renderBatches();
-}
-
-// Restore batches on load
-renderBatches();
+// ====== START ======
 startScanner();
