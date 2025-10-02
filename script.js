@@ -1,4 +1,4 @@
-// Force open in Chrome/Browser if opened inside Messenger or FB in-app browser
+// ====== FORCE OPEN IN BROWSER ======
 (function() {
   const ua = navigator.userAgent || navigator.vendor || "";
   if (ua.includes("FBAN") || ua.includes("FBAV") || ua.includes("Messenger")) {
@@ -11,9 +11,11 @@
   }
 })();
 
+// ====== GLOBAL VARS ======
 let currentStream = null;
-let currentMode = "all";
+let currentMode = "all"; // "1d", "2d", "all"
 let usingFrontCamera = false;
+let codeReader = null;
 
 let entries = [];
 let batches = [];
@@ -21,19 +23,34 @@ let batches = [];
 // ====== CAMERA & SCANNER ======
 async function startScanner() {
   stopScanner();
+
   const constraints = {
     video: { facingMode: usingFrontCamera ? "user" : "environment" }
   };
+
   try {
-    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
     const video = document.getElementById("cameraPreview");
+    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
     video.srcObject = currentStream;
 
+    // 1D (Quagga)
     if (currentMode === "1d" || currentMode === "all") {
       Quagga.init({
-        inputStream: { type: "LiveStream", target: video, constraints },
-        decoder: { readers: ["ean_reader", "code128_reader", "upc_reader"] }
-      }, err => { if (!err) Quagga.start(); });
+        inputStream: {
+          type: "LiveStream",
+          target: video,
+          constraints: constraints
+        },
+        decoder: {
+          readers: ["ean_reader", "code128_reader", "upc_reader"]
+        }
+      }, err => {
+        if (err) {
+          console.error("Quagga init error:", err);
+          return;
+        }
+        Quagga.start();
+      });
 
       Quagga.onDetected(res => {
         if (res && res.codeResult && res.codeResult.code) {
@@ -42,14 +59,16 @@ async function startScanner() {
       });
     }
 
+    // 2D (ZXing)
     if (currentMode === "2d" || currentMode === "all") {
-      const codeReader = new ZXing.BrowserMultiFormatReader();
+      codeReader = new ZXing.BrowserMultiFormatReader();
       codeReader.decodeFromVideoDevice(null, "cameraPreview", (res, err) => {
         if (res) handleScan(res.text);
       });
     }
   } catch (err) {
     console.error("Camera error:", err);
+    alert("❌ Camera not accessible. Please allow permission and try again.");
   }
 }
 
@@ -59,6 +78,10 @@ function stopScanner() {
     currentStream = null;
   }
   if (Quagga) Quagga.stop();
+  if (codeReader) {
+    codeReader.reset();
+    codeReader = null;
+  }
 }
 
 function toggleCamera() {
