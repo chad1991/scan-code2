@@ -1,74 +1,56 @@
-// ====== FORCE OPEN IN BROWSER ======
-(function() {
-  const ua = navigator.userAgent || navigator.vendor || "";
-  if (ua.includes("FBAN") || ua.includes("FBAV") || ua.includes("Messenger")) {
-    // Android: force Chrome, iOS: fallback to Safari
-    if (/Android/i.test(ua)) {
-      window.location = "intent://" + window.location.host + window.location.pathname + "#Intent;scheme=https;package=com.android.chrome;end";
-    } else {
-      window.location = window.location.href; // iOS reopens in Safari
-    }
-  }
-})();
-
-// ====== GLOBAL VARS ======
+// ================== GLOBAL VARIABLES ==================
+let currentBatch = 0;
+let batches = [[]]; // array of batches
+let scannerRunning = false;
 let currentStream = null;
-let currentMode = "all"; // "1d", "2d", "all"
-let usingFrontCamera = false;
-let codeReader = null;
+let usingZXing = false;
+let selectedCamera = null;
+let scanMode = "all"; // "1d", "2d", "all"
 
-let entries = [];
-let batches = [];
-
-// ====== CAMERA & SCANNER ======
+// ================== CAMERA / SCANNER ==================
 async function startScanner() {
   stopScanner();
-
-  const constraints = {
-    video: { facingMode: usingFrontCamera ? "user" : "environment" }
-  };
+  const video = document.getElementById("cameraPreview");
 
   try {
-    const video = document.getElementById("cameraPreview");
+    // Get available cameras
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === "videoinput");
+
+    if (cameras.length === 0) {
+      alert("No camera found.");
+      return;
+    }
+
+    if (!selectedCamera) {
+      selectedCamera = cameras[cameras.length - 1].deviceId; // default: back camera
+    }
+
+    // Setup stream
+    const constraints = {
+      video: { deviceId: { exact: selectedCamera } }
+    };
     currentStream = await navigator.mediaDevices.getUserMedia(constraints);
     video.srcObject = currentStream;
 
-    // 1D (Quagga)
-    if (currentMode === "1d" || currentMode === "all") {
-      Quagga.init({
-        inputStream: {
-          type: "LiveStream",
-          target: video,
-          constraints: constraints
-        },
-        decoder: {
-          readers: ["ean_reader", "code128_reader", "upc_reader"]
-        }
-      }, err => {
-        if (err) {
-          console.error("Quagga init error:", err);
-          return;
-        }
-        Quagga.start();
-      });
-
-      Quagga.onDetected(res => {
-        if (res && res.codeResult && res.codeResult.code) {
-          handleScan(res.codeResult.code);
-        }
-      });
+    // Init scanner
+    if (scanMode === "1d") {
+      usingZXing = false;
+      initQuagga(video);
+    } else if (scanMode === "2d") {
+      usingZXing = true;
+      initZXing(video);
+    } else {
+      // All: try both
+      usingZXing = false;
+      initQuagga(video);
+      initZXing(video);
     }
 
-    // 2D (ZXing)
-    if (currentMode === "2d" || currentMode === "all") {
-      codeReader = new ZXing.BrowserMultiFormatReader();
-      codeReader.decodeFromVideoDevice(null, "cameraPreview", (res, err) => {
-        if (res) handleScan(res.text);
-      });
-    }
+    scannerRunning = true;
   } catch (err) {
-    console.error("Camera error:", err);
-    alert("❌ Camera not accessible. Please allow permission and try again.");
+    console.error("Camera start error:", err);
+    alert("Camera error: " + err.message);
   }
 }
 
@@ -77,162 +59,245 @@ function stopScanner() {
     currentStream.getTracks().forEach(track => track.stop());
     currentStream = null;
   }
-  if (Quagga) Quagga.stop();
-  if (codeReader) {
-    codeReader.reset();
-    codeReader = null;
+  if (window.Quagga) {
+    Quagga.stop();
   }
+  scannerRunning = false;
 }
 
 function toggleCamera() {
-  usingFrontCamera = !usingFrontCamera;
+  stopScanner();
+  selectedCamera = null; // reset so it picks the other one
   startScanner();
 }
 
 function switchMode(mode) {
-  currentMode = mode;
+  scanMode = mode;
   startScanner();
 }
 
-// ====== ENTRIES ======
-function handleScan(code) {
-  document.getElementById("beepSuccess").play();
-  document.getElementById("result").textContent = "Scanned: " + code;
-
-  let existing = entries.find(e => e.barcode === code);
-  if (existing) {
-    existing.qty += 1;
-  } else {
-    entries.push({ barcode: code, qty: 1, price: 0 });
-  }
-  renderEntries();
-}
-
-function renderEntries() {
-  const ul = document.getElementById("entriesList");
-  ul.innerHTML = "";
-  entries.forEach((e, idx) => {
-    const li = document.createElement("li");
-    li.innerHTML = `
-      <span>${e.barcode}</span>
-      Qty: <input type="number" value="${e.qty}" min="1" onchange="updateEntry(${idx}, 'qty', this.value)">
-      Price: <input type="number" value="${e.price}" step="0.01" onchange="updateEntry(${idx}, 'price', this.value)">
-      <button onclick="deleteEntry(${idx})">❌</button>
-    `;
-    ul.appendChild(li);
+// ================== QUAGGA (1D) ==================
+function initQuagga(video) {
+  Quagga.init({
+    inputStream: {
+      type: "LiveStream",
+      target: video,
+      constraints: { deviceId: selectedCamera }
+    },
+    decoder: {
+      readers: ["code_128_reader","ean_reader","ean_8_reader","code_39_reader","upc_reader"]
+    }
+  }, err => {
+    if (err) {
+      console.error(err);
+      return;
+    }
+    Quagga.start();
+    Quagga.onDetected(res => {
+      if (res && res.codeResult && res.codeResult.code) {
+        handleScan(res.codeResult.code);
+      }
+    });
   });
 }
 
-function updateEntry(i, field, val) {
-  entries[i][field] = parseFloat(val);
-}
-
-function deleteEntry(i) {
-  entries.splice(i, 1);
-  renderEntries();
-}
-
-function addManualEntry() {
-  const b = document.getElementById("manualBarcode").value.trim();
-  const q = parseInt(document.getElementById("manualQty").value);
-  const p = parseFloat(document.getElementById("manualPrice").value) || 0;
-  if (!b) return;
-
-  let existing = entries.find(e => e.barcode === b);
-  if (existing) {
-    existing.qty += q;
-    existing.price = p;
-  } else {
-    entries.push({ barcode: b, qty: q, price: p });
+// ================== ZXING (2D/QR) ==================
+async function initZXing(video) {
+  try {
+    const codeReader = new ZXing.BrowserMultiFormatReader();
+    const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+    if (devices.length > 0) {
+      codeReader.decodeFromVideoDevice(selectedCamera, "cameraPreview", result => {
+        if (result) handleScan(result.text);
+      });
+    }
+  } catch (e) {
+    console.error("ZXing init error:", e);
   }
-  renderEntries();
+}
 
+// ================== FEEDBACK (BEEP + VIBRATION) ==================
+function feedback() {
+  try {
+    // 🔔 Beep sound
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 600;
+    osc.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.2);
+
+    // 📳 Vibration
+    if (navigator.vibrate) {
+      navigator.vibrate(150);
+    }
+  } catch (e) {
+    console.warn("Feedback error:", e);
+  }
+}
+
+// ================== SCAN HANDLER ==================
+function handleScan(code) {
+  let batch = batches[currentBatch];
+  let existing = batch.find(item => item.code === code);
+
+  if (existing) {
+    existing.qty += 1;
+  } else {
+    batch.push({ code: code, price: 0, qty: 1 });
+  }
+
+  document.getElementById("result").innerText = "Scanned: " + code;
+  feedback();
+  renderTable();
+}
+
+// ================== MANUAL ENTRY ==================
+function addManualEntry() {
+  let code = document.getElementById("manualBarcode").value.trim();
+  let qty = parseInt(document.getElementById("manualQty").value);
+  let price = parseFloat(document.getElementById("manualPrice").value);
+
+  if (!code) return;
+
+  let batch = batches[currentBatch];
+  let existing = batch.find(item => item.code === code);
+  if (existing) {
+    existing.qty += qty;
+    existing.price = price;
+  } else {
+    batch.push({ code, qty, price });
+  }
+
+  feedback();
+  renderTable();
   document.getElementById("manualBarcode").value = "";
   document.getElementById("manualQty").value = 1;
   document.getElementById("manualPrice").value = "";
 }
 
-// ====== BATCHES ======
+// ================== RENDER ENTRIES ==================
+function renderTable() {
+  let list = document.getElementById("entriesList");
+  list.innerHTML = "";
+  batches[currentBatch].forEach((item, i) => {
+    let li = document.createElement("li");
+    li.innerHTML = `
+      ${item.code} 
+      Qty: <input type="number" value="${item.qty}" min="1" onchange="updateQty(${i}, this.value)">
+      Price: <input type="number" value="${item.price}" step="0.01" onchange="updatePrice(${i}, this.value)">
+    `;
+    list.appendChild(li);
+  });
+}
+
+function updateQty(index, val) {
+  batches[currentBatch][index].qty = parseInt(val);
+}
+
+function updatePrice(index, val) {
+  batches[currentBatch][index].price = parseFloat(val);
+}
+
+// ================== BATCH MANAGEMENT ==================
 function nextBatch() {
-  if (entries.length === 0) return;
-
-  const header = {
-    date: document.getElementById("logDate").value,
-    store: document.getElementById("storeName").value,
-    discount: document.getElementById("discount").value
-  };
-  batches.push({ header, items: [...entries] });
-
-  entries = [];
-  renderEntries();
+  if (batches[currentBatch].length === 0) {
+    alert("Current batch is empty.");
+    return;
+  }
+  currentBatch++;
+  batches[currentBatch] = [];
+  document.getElementById("entriesList").innerHTML = "";
   renderBatches();
 }
 
 function renderBatches() {
-  const ul = document.getElementById("batchesList");
-  ul.innerHTML = "";
-  batches.forEach((b, idx) => {
-    const li = document.createElement("li");
+  let list = document.getElementById("batchesList");
+  list.innerHTML = "";
+  batches.forEach((batch, idx) => {
+    if (batch.length === 0) return;
+    let li = document.createElement("li");
     li.innerHTML = `
-      Batch ${idx+1} - ${b.header.store || "No Store"}
-      <div>
-        <button class="view" onclick="viewBatch(${idx})">View</button>
-        <button class="delete" onclick="deleteBatch(${idx})">Delete</button>
-      </div>
+      Batch ${idx + 1} (${batch.length} items)
+      <button class="view" onclick="viewBatch(${idx})">View</button>
+      <button class="delete" onclick="deleteBatch(${idx})">Delete</button>
     `;
-    ul.appendChild(li);
+    list.appendChild(li);
   });
 }
 
-function viewBatch(i) {
-  const b = batches[i];
-  document.getElementById("modalTitle").textContent = `Batch ${i+1}`;
-  document.getElementById("modalHeader").textContent =
-    `Date: ${b.header.date}, Store: ${b.header.store}, Discount: ${b.header.discount}%`;
+function viewBatch(idx) {
+  let modal = document.getElementById("batchModal");
+  document.getElementById("modalTitle").innerText = "Batch " + (idx + 1);
+  document.getElementById("modalHeader").innerText =
+    "Date: " + (document.getElementById("logDate").value || "N/A") +
+    " | Store: " + (document.getElementById("storeName").value || "N/A") +
+    " | Discount: " + document.getElementById("discount").value + "%";
 
-  const tbody = document.getElementById("modalTableBody");
+  let tbody = document.getElementById("modalTableBody");
   tbody.innerHTML = "";
-  b.items.forEach(it => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${it.barcode}</td><td>${it.qty}</td><td>${it.price}</td>`;
+  batches[idx].forEach(item => {
+    let tr = document.createElement("tr");
+    tr.innerHTML = `<td>${item.code}</td><td>${item.qty}</td><td>${item.price}</td>`;
     tbody.appendChild(tr);
   });
-  document.getElementById("batchModal").style.display = "flex";
-}
 
-function deleteBatch(i) {
-  batches.splice(i, 1);
-  renderBatches();
+  modal.style.display = "flex";
 }
 
 function closeModal() {
   document.getElementById("batchModal").style.display = "none";
 }
 
+function deleteBatch(idx) {
+  batches.splice(idx, 1);
+  if (currentBatch >= batches.length) currentBatch = batches.length - 1;
+  renderBatches();
+}
+
+// ================== SAVE TO EXCEL ==================
+function downloadExcel() {
+  let allData = [];
+  batches.forEach((batch, idx) => {
+    batch.forEach(item => {
+      allData.push({
+        Batch: idx + 1,
+        Code: item.code,
+        Qty: item.qty,
+        Price: item.price,
+        Date: document.getElementById("logDate").value,
+        Store: document.getElementById("storeName").value,
+        Discount: document.getElementById("discount").value
+      });
+    });
+  });
+
+  if (allData.length === 0) {
+    alert("No data to save.");
+    return;
+  }
+
+  let ws = XLSX.utils.json_to_sheet(allData);
+  let wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Logsheet");
+  XLSX.writeFile(wb, "logsheet.xlsx");
+}
+
+// ================== CLEAR ==================
 function clearHistory() {
-  if (confirm("Clear all entries and batches?")) {
-    entries = [];
-    batches = [];
-    renderEntries();
+  if (confirm("Clear all data?")) {
+    batches = [[]];
+    currentBatch = 0;
+    renderTable();
     renderBatches();
   }
 }
 
-// ====== EXPORT ======
-function downloadExcel() {
-  if (batches.length === 0) return;
-
-  const wb = XLSX.utils.book_new();
-
-  batches.forEach((b, idx) => {
-    let data = [["Barcode", "Qty", "Price"]];
-    b.items.forEach(it => data.push([it.barcode, it.qty, it.price]));
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    XLSX.utils.book_append_sheet(wb, ws, `Batch${idx+1}`);
-  });
-
-  XLSX.writeFile(wb, "batches.xlsx");
+// ================== FORCE OPEN IN CHROME ==================
+if (navigator.userAgent.includes("FBAN") || navigator.userAgent.includes("FBAV")) {
+  window.location.href = "googlechrome://" + window.location.href.replace(/^https?:\/\//, "");
 }
-
-// ====== START ======
-startScanner();
